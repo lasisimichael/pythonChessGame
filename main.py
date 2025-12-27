@@ -1,6 +1,5 @@
 import pygame
 from game import GameState
-import game
 from renderer import Renderer
 
 def mouse_to_square(pos, renderer):
