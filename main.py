@@ -1,5 +1,5 @@
 import pygame
-from game import GameState
+from game import GameState,perft, perft_divide, perft_promotion_divide
 from renderer import Renderer
 
 def mouse_to_square(pos, renderer):
@@ -11,6 +11,19 @@ def mouse_to_square(pos, renderer):
         return row, col
     return None
 
+def handle_undo(game):
+    # If promotion UI is open, cancel it instead
+    if game.promotion_pending:
+        pawn, r, c = game.promotion_pending
+        game.promotion_pending = None
+        game.undo_move()
+        return
+
+    if not game.move_history:
+        return
+
+    game.undo_move()
+
 def main():
     game_over = False
     selected_piece = None
@@ -21,6 +34,10 @@ def main():
     window = pygame.display.set_mode((576, 640))
 
     game = GameState()
+    game.setup_promotion_test()
+    """for depth in range(1, 6):
+        print(f"Depth = {depth}\nPerft Promotion Divide: {perft_promotion_divide(game, depth)}\n")"""
+
     renderer = Renderer(window, game.board)
     
     running = True
@@ -28,6 +45,16 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            if event.type == pygame.QUIT:
+                running = False
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_u:
+                    handle_undo(game)
+                    selected_piece = None
+                    legal_targets = []
+                    last_move_square = None
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if game.promotion_pending:
@@ -125,7 +152,7 @@ def main():
                 renderer.highlight_square(king_pos[0], king_pos[1], color=(255, 0, 0))
 
         renderer.draw_pieces()
-        renderer.draw_status_bar(status_text)
+        renderer.draw_status_bar(status_text + " Press 'U' to undo.") if len(game.move_history) > 0 else renderer.draw_status_bar(status_text)
 
         if game_over:
             renderer.dim_board()

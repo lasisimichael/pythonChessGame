@@ -61,9 +61,6 @@ class GameState:
                 for (r, c) in piece.get_moves(self.board, self):
                     moves.append((piece, r, c))
 
-                if isinstance(piece, King):
-                    self._add_castling_moves(piece, moves)
-
         return moves
 
     def _add_castling_moves(self, king, moves):
@@ -81,7 +78,7 @@ class GameState:
                 if not self.is_square_attacked(row, 4, enemy) and \
                 not self.is_square_attacked(row, 5, enemy) and \
                 not self.is_square_attacked(row, 6, enemy):
-                    moves.append((king, row, 6))
+                    moves.append((row, 6))
 
         # Queen-side
         rook = self.board.grid[row][0]
@@ -92,9 +89,9 @@ class GameState:
                 if not self.is_square_attacked(row, 4, enemy) and \
                 not self.is_square_attacked(row, 3, enemy) and \
                 not self.is_square_attacked(row, 2, enemy):
-                    moves.append((king, row, 2))
+                    moves.append((row, 2))
 
-    def make_move(self, piece, to_row, to_col, simulate=False):
+    def make_move(self, piece, to_row, to_col, simulate=False, promotion = None):
         from_row, from_col = piece.row, piece.col
         captured = self.board.grid[to_row][to_col]
         old_ep = self.en_passant_target
@@ -110,6 +107,7 @@ class GameState:
         
         was_castling = False
         rook = rook_from = rook_to = None
+        rook_had_moved = False
         # Detect castling
         if piece.__class__.__name__ == "King":
             if abs(to_col - from_col) == 2:  # castling attempt
@@ -120,7 +118,8 @@ class GameState:
                 else:
                     rook_from, rook_to = 0, 3
                 rook = self.board.grid[row][rook_from]
-                self.castle_rook(piece, to_col)
+                rook_had_moved = rook.has_moved if rook else False
+                
 
         record = MoveRecord(
             piece, from_row, from_col, to_row, to_col,
@@ -132,13 +131,18 @@ class GameState:
             piece_had_moved
         )
         record.fullmove_number = self.fullmove_number
-        record.rook_has_moved = rook.has_moved if rook else False
+        record.rook_has_moved = rook_had_moved
         record.turn = self.turn
 
         self.move_history.append(record)
 
         # Move the piece normally
         self.board.move_piece(piece, to_row, to_col)
+        piece.has_moved = True
+
+        if isinstance(piece, King):
+            if abs(to_col - from_col) == 2:
+                self.castle_rook(piece, to_col)
 
         # Set en passant target if pawn double-steps
         if isinstance(piece, Pawn) and abs(to_row - from_row) == 2:
@@ -147,26 +151,38 @@ class GameState:
         else:
             self.en_passant_target = None
 
-            
+
         # Promotion
         if isinstance(piece, Pawn) and (to_row == 0 or to_row == 7):
             record.was_promotion = True
 
-            if not simulate:
+            if simulate:
+                self.board.grid[to_row][to_col] = None
+
+                cls = {
+                    'q': Queen,
+                    'r': Rook,
+                    'b': Bishop,
+                    'n': Knight
+                }[promotion or 'q']
+
+                promoted = cls(piece.color, to_row, to_col)
+                promoted.has_moved = True
+
+                record.promoted_piece = promoted
+                self.board.grid[to_row][to_col] = promoted
+
+            else:
+                # --- real game: pause for UI ---
                 self.promotion_pending = (piece, to_row, to_col)
                 return
-            else:
-                # DO NOTHING during simulation
-                pass
 
         # Update turn
+        self.turn = 'b' if self.turn == 'w' else 'w'
+
         if not simulate:
-            self.turn = 'b' if self.turn == 'w' else 'w'
             if self.turn == 'w':
                 self.fullmove_number += 1
-
-            if piece.__class__.__name__ != "Pawn" or abs(to_row - from_row) != 2:
-                self.en_passant_target = None
 
     def castle_rook(self, king, king_target_col):
         row = king.row
@@ -181,6 +197,7 @@ class GameState:
         rook = self.board.grid[row][rook_from]
         if rook:
             self.board.move_piece(rook, row, rook_to)
+            rook.has_moved = True
 
     def promote_pawn(self, pawn, piece_type):
         row, col = pawn.row, pawn.col
@@ -223,12 +240,43 @@ class GameState:
 
         return legal_moves
 
+    def is_castling_legal(self, king, to_row, to_col):
+        if king.has_moved:
+            return False
+
+        row = king.row
+        enemy = 'b' if king.color == 'w' else 'w'
+
+        if to_col == 6:  # king-side
+            path = [4, 5, 6]
+            rook_col = 7
+        else:            # queen-side
+            path = [4, 3, 2]
+            rook_col = 0
+
+        rook = self.board.grid[row][rook_col]
+        if not rook or rook.has_moved or not isinstance(rook, Rook):
+            return False
+
+        # Squares between must be empty
+        for c in path[1:]:
+            if self.board.grid[row][c] is not None:
+                return False
+
+        # King cannot pass through or land in check
+        for c in path:
+            if self.is_square_attacked(row, c, enemy):
+                return False
+
+        return True
+
     def is_legal(self, piece, to_row, to_col):
-        """
-        Make the move on a temporary board and check:
-        - does own king remain safe?
-        """
-        
+        # Castling legality
+        if isinstance(piece, King) and abs(to_col - piece.col) == 2:
+            if not self.is_castling_legal(piece, to_row, to_col):
+                return False
+
+        # Normal simulation (handles EP internally)
         self.make_move(piece, to_row, to_col, True)
         legal = not self.is_in_check(piece.color)
         self.undo_move()
@@ -242,15 +290,16 @@ class GameState:
         board = self.board.grid
 
         # ---------- Pawn attacks ----------
-        dr = 1 if by_color == 'w' else -1
-        for dc in (-1, 1):
-            r = row + dr
-            c = col + dc
+        if by_color == 'w':
+            pawn_rows = [(row + 1, col - 1), (row + 1, col + 1)]
+        else:
+            pawn_rows = [(row - 1, col - 1), (row - 1, col + 1)]
+
+        for r, c in pawn_rows:
             if 0 <= r < 8 and 0 <= c < 8:
                 attacker = board[r][c]
-                if attacker and attacker.color == by_color and attacker.__class__.__name__ == "Pawn":
+                if attacker and attacker.color == by_color and isinstance(attacker, Pawn):
                     return True
-
         
         # ---------- Knight attacks ----------
         knight_moves = [(-2, 1), (-1, 2), (1, 2), (2, 1),
@@ -354,7 +403,20 @@ class GameState:
 
         self.turn = current_turn
 
-        return len(legal_moves) == 0
+        if len(legal_moves) == 0:
+            return True
+        
+        grid = self.board.grid
+        piece_count = 0
+        for r in range(8):
+            for c in range(8):
+                piece = grid[r][c]
+                if piece and piece.__class__.__name__ != "King":
+                    piece_count += 1
+        if piece_count == 0:
+            return True                
+
+        return False
 
     def undo_move(self):
         if not self.move_history:
@@ -388,7 +450,7 @@ class GameState:
             self.board.grid[ep_row][ep_col] = record.ep_captured
 
         # Undo castling rook move
-        if record.was_castling:
+        if record.was_castling and record.rook:
             row = record.from_row
             self.board.grid[row][record.rook_to] = None
             self.board.grid[row][record.rook_from] = record.rook
@@ -398,12 +460,14 @@ class GameState:
         if record.was_promotion:
             # Remove promoted piece ONLY if it exists
             if record.promoted_piece:
-                self.board.grid[record.to_row][record.to_col] = None
+                self.board.grid[record.to_row][record.to_col] = record.captured
 
             # Restore pawn
-            self.board.grid[record.from_row][record.from_col] = record.piece
-            record.piece.row = record.from_row
-            record.piece.col = record.from_col
+            pawn = record.piece
+            pawn.row = record.from_row
+            pawn.col = record.from_col
+            pawn.has_moved = record.piece_has_moved
+            self.board.grid[record.from_row][record.from_col] = pawn
 
     def setup_promotion_test(self):
         self.board.grid = [[None for _ in range(8)] for _ in range(8)]
@@ -422,6 +486,75 @@ class GameState:
         self.move_history.clear()
         self.en_passant_target = None
 
+    def setup_promotion_perft(self):
+        self.board.grid = [[None for _ in range(8)] for _ in range(8)]
+
+        # White pawn on 7th rank
+        pawn = Pawn('w', 1, 0)   # a7
+        self.board.grid[1][0] = pawn
+
+        # Black piece to capture on promotion square
+        rook = Rook('b', 0, 1)   # b8
+        self.board.grid[0][1] = rook
+
+        # Kings (mandatory)
+        wk = King('w', 7, 4)
+        bk = King('b', 0, 4)
+
+        self.board.grid[7][4] = wk
+        self.board.grid[0][4] = bk
+
+        self.turn = 'w'
+        self.move_history.clear()
+        self.en_passant_target = None
+
+def perft_promotion(game, depth):
+    if depth == 0:
+        return 1
+
+    nodes = 0
+
+    for piece, r, c in game.get_legal_moves():
+        is_promo = isinstance(piece, Pawn) and (r == 0 or r == 7)
+
+        if is_promo:
+            for promo in ['q', 'r', 'b', 'n']:
+                game.make_move(piece, r, c, simulate=True, promotion=promo)
+                nodes += perft_promotion(game, depth - 1)
+                game.undo_move()
+        else:
+            game.make_move(piece, r, c, simulate=True)
+            nodes += perft_promotion(game, depth - 1)
+            game.undo_move()
+
+    return nodes
+
+def perft_promotion_divide(game, depth):
+    results = {}
+
+    for piece, r, c in game.get_legal_moves():
+        if isinstance(piece, Pawn) and (r == 0 or r == 7):
+            for promo in ['q', 'r', 'b', 'n']:
+                game.make_move(piece, r, c, simulate=True, promotion=promo)
+                count = perft_promotion(game, depth - 1)
+                game.undo_move()
+
+                from_file = chr(ord('a') + piece.col)
+                from_rank = 8 - piece.row
+                to_file = chr(ord('a') + c)
+                to_rank = 8 - r
+
+                key = f"{from_file}{from_rank}->{to_file}{to_rank}={promo.upper()}"
+
+                results[key] = count
+        else:
+            game.make_move(piece, r, c, simulate=True)
+            count = perft_promotion(game, depth - 1)
+            game.undo_move()
+            results[f"{piece}"] = count
+
+    return results
+
 def perft(game, depth):
     if depth == 0:
         return 1
@@ -431,14 +564,6 @@ def perft(game, depth):
 
     for piece, r, c in moves:
         game.make_move(piece, r, c, simulate=True)
-
-        # Handle auto-promotion during simulation
-        if game.move_history[-1].was_promotion:
-            # Promote to queen only (standard perft rule)
-            pawn = game.move_history[-1].piece
-            row, col = pawn.row, pawn.col
-            color = pawn.color
-            game.board.grid[row][col] = Queen(color, row, col)
 
         nodes += perft(game, depth - 1)
         game.undo_move()
@@ -451,12 +576,6 @@ def perft_divide(game, depth):
 
     for piece, r, c in moves:
         game.make_move(piece, r, c, simulate=True)
-
-        if game.move_history[-1].was_promotion:
-            pawn = game.move_history[-1].piece
-            row, col = pawn.row, pawn.col
-            color = pawn.color
-            game.board.grid[row][col] = Queen(color, row, col)
 
         count = perft(game, depth - 1)
         game.undo_move()
