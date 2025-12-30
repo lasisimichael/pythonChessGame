@@ -80,7 +80,7 @@ class Renderer:
                         (self.board_x + col * self.square_size, self.board_y + row * self.square_size)
                     )
 
-    def draw_status_bar(self, text):
+    def draw_status_bar(self, status_text, can_undo=False):
         bar_height = 64
         y = self.board_y + 8 * self.square_size
 
@@ -91,10 +91,27 @@ class Renderer:
             (0, y, self.window.get_width(), bar_height)
         )
 
+        if can_undo:
+            full_text = f"{status_text}   •   [U] Undo"
+        else:
+            full_text = status_text
+
         # Text
-        label = self.font.render(text, True, (255, 255, 255))
-        x = self.window.get_width() // 2 - label.get_width() // 2
-        self.window.blit(label, (x, y + bar_height // 2 - label.get_height() // 2))
+        font = pygame.font.SysFont(None, 28)
+        text_color = (240, 240, 240)
+
+        if can_undo:
+            full_text = f"{status_text}   •   [U] Undo"
+        else:
+            full_text = status_text
+
+        text_surface = font.render(full_text, True, text_color)
+        text_rect = text_surface.get_rect()
+
+        text_rect.centerx = self.window.get_width() // 2
+        text_rect.centery = y + bar_height // 2
+
+        self.window.blit(text_surface, text_rect)
 
     def highlight_moves(self, moves):
         for r, c in moves:

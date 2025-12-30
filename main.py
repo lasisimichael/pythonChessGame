@@ -1,5 +1,5 @@
 import pygame
-from game import GameState,perft, perft_divide, perft_promotion_divide
+from game import GameState
 from renderer import Renderer
 
 def mouse_to_square(pos, renderer):
@@ -34,9 +34,6 @@ def main():
     window = pygame.display.set_mode((576, 640))
 
     game = GameState()
-    game.setup_promotion_test()
-    """for depth in range(1, 6):
-        print(f"Depth = {depth}\nPerft Promotion Divide: {perft_promotion_divide(game, depth)}\n")"""
 
     renderer = Renderer(window, game.board)
     
@@ -152,7 +149,10 @@ def main():
                 renderer.highlight_square(king_pos[0], king_pos[1], color=(255, 0, 0))
 
         renderer.draw_pieces()
-        renderer.draw_status_bar(status_text + " Press 'U' to undo.") if len(game.move_history) > 0 else renderer.draw_status_bar(status_text)
+        if len(game.move_history) < 1 or game_over:
+            renderer.draw_status_bar(status_text)
+        else:
+            renderer.draw_status_bar(status_text, can_undo=True)
 
         if game_over:
             renderer.dim_board()
