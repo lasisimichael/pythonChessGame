@@ -50,21 +50,6 @@ class GameState:
         self.en_passant_target = None
         self.promotion_pending = None
 
-    def get_pseudo_legal_moves(self):
-        moves = []
-        for row in range(8):
-            for col in range(8):
-                piece = self.board.grid[row][col]
-                if piece is None:
-                    continue
-                if piece.color != self.turn:
-                    continue
-
-                for (r, c) in piece.get_moves(self.board, self):
-                    moves.append((piece, r, c))
-
-        return moves
-
     def _add_castling_moves(self, king, moves):
         if king.has_moved:
             return
@@ -92,6 +77,62 @@ class GameState:
                 not self.is_square_attacked(row, 3, enemy) and \
                 not self.is_square_attacked(row, 2, enemy):
                     moves.append((row, 2))
+
+    def castle_rook(self, king, king_target_col):
+        row = king.row
+
+        if king_target_col == 6:  # king-side castle
+            rook_from = 7
+            rook_to = 5
+        else:                    # queen-side castle
+            rook_from = 0
+            rook_to = 3
+
+        rook = self.board.grid[row][rook_from]
+        if rook:
+            self.board.move_piece(rook, row, rook_to)
+            rook.has_moved = True
+
+    def current_player_in_check(self):
+        return self.is_in_check(self.turn)
+
+    def find_king(self, color):
+        for r in range(8):
+            for c in range(8):
+                piece = self.board.grid[r][c]
+                if piece and piece.color == color and piece.__class__.__name__ == "King":
+                    return (r, c)
+        return None
+
+    def get_legal_moves(self):
+        """
+        Filter pseudo-legal moves by removing:
+        - moves that leave king in check
+        - illegal castling
+        - illegal en-passant (if king would be exposed)
+        """
+        legal_moves = []
+
+        for (piece, r, c) in self.get_pseudo_legal_moves():
+            if self.is_legal(piece, r, c):
+                legal_moves.append((piece, r, c))
+
+        return legal_moves
+
+    def get_pseudo_legal_moves(self):
+        moves = []
+        for row in range(8):
+            for col in range(8):
+                piece = self.board.grid[row][col]
+                if piece is None:
+                    continue
+                if piece.color != self.turn:
+                    continue
+
+                for (r, c) in piece.get_moves(self.board, self):
+                    moves.append((piece, r, c))
+
+        return moves
 
     def make_move(self, piece, to_row, to_col, simulate=False, promotion = None):
         from_row, from_col = piece.row, piece.col
@@ -191,21 +232,6 @@ class GameState:
                 self.halfmove_clock += 1
             piece.has_moved = True
 
-    def castle_rook(self, king, king_target_col):
-        row = king.row
-
-        if king_target_col == 6:  # king-side castle
-            rook_from = 7
-            rook_to = 5
-        else:                    # queen-side castle
-            rook_from = 0
-            rook_to = 3
-
-        rook = self.board.grid[row][rook_from]
-        if rook:
-            self.board.move_piece(rook, row, rook_to)
-            rook.has_moved = True
-
     def promote_pawn(self, pawn, piece_type):
         row, col = pawn.row, pawn.col
         color = pawn.color
@@ -231,21 +257,6 @@ class GameState:
 
         # NOW switch turn
         self.turn = 'b' if self.turn == 'w' else 'w'
-
-    def get_legal_moves(self):
-        """
-        Filter pseudo-legal moves by removing:
-        - moves that leave king in check
-        - illegal castling
-        - illegal en-passant (if king would be exposed)
-        """
-        legal_moves = []
-
-        for (piece, r, c) in self.get_pseudo_legal_moves():
-            if self.is_legal(piece, r, c):
-                legal_moves.append((piece, r, c))
-
-        return legal_moves
 
     def is_castling_legal(self, king, to_row, to_col):
         if king.has_moved:
@@ -276,6 +287,63 @@ class GameState:
                 return False
 
         return True
+
+    def is_checkmate(self, color):
+        # Condition 1: king must be in check
+        if not self.is_in_check(color):
+            return False
+
+        # Condition 2: no legal moves available
+        current_turn = self.turn
+        self.turn = color  # temporarily set turn
+
+        legal_moves = self.get_legal_moves()
+
+        self.turn = current_turn  # restore turn
+
+        return len(legal_moves) == 0
+
+    def is_fifty_move_draw(self):
+        return self.halfmove_clock >= 100
+
+    def is_in_check(self, color):
+        king_pos = self.find_king(color)
+        if king_pos is None:
+            return False  # should never happen, but keeps things safe
+
+        enemy = 'b' if color == 'w' else 'w'
+        return self.is_square_attacked(king_pos[0], king_pos[1], enemy)
+
+    def is_insufficient_material(self):
+        pieces = []
+
+        for r in range(8):
+            for c in range(8):
+                p = self.board.grid[r][c]
+                if p:
+                    pieces.append(p)
+
+        # Only kings
+        if len(pieces) == 2:
+            return True
+
+        # King + minor vs King
+        if len(pieces) == 3:
+            minor = [p for p in pieces if not isinstance(p, King)]
+            if len(minor) == 1 and isinstance(minor[0], (Bishop, Knight)):
+                return True
+
+        # King + bishop vs King + bishop (same color bishops)
+        if len(pieces) == 4:
+            bishops = [p for p in pieces if isinstance(p, Bishop)]
+            if len(bishops) == 2:
+                colors = []
+                for b in bishops:
+                    square_color = (b.row + b.col) % 2
+                    colors.append(square_color)
+                return colors[0] == colors[1]
+
+        return False
 
     def is_legal(self, piece, to_row, to_col):
         # Castling legality
@@ -364,64 +432,26 @@ class GameState:
 
         return False
 
-    def find_king(self, color):
-        for r in range(8):
-            for c in range(8):
-                piece = self.board.grid[r][c]
-                if piece and piece.color == color and piece.__class__.__name__ == "King":
-                    return (r, c)
-        return None
-
-    def is_in_check(self, color):
-        king_pos = self.find_king(color)
-        if king_pos is None:
-            return False  # should never happen, but keeps things safe
-
-        enemy = 'b' if color == 'w' else 'w'
-        return self.is_square_attacked(king_pos[0], king_pos[1], enemy)
-
-    def current_player_in_check(self):
-        return self.is_in_check(self.turn)
-
-    def is_checkmate(self, color):
-        # Condition 1: king must be in check
-        if not self.is_in_check(color):
-            return False
-
-        # Condition 2: no legal moves available
-        current_turn = self.turn
-        self.turn = color  # temporarily set turn
-
-        legal_moves = self.get_legal_moves()
-
-        self.turn = current_turn  # restore turn
-
-        return len(legal_moves) == 0
-
     def is_stalemate(self, color):
-        # Not in check
         if self.is_in_check(color):
             return False
 
         current_turn = self.turn
         self.turn = color
-
         legal_moves = self.get_legal_moves()
-
         self.turn = current_turn
 
-        if len(legal_moves) == 0 or self.is_fifty_move_draw() or self.is_threefold_repetition():
+        if len(legal_moves) == 0:
             return True
 
-        grid = self.board.grid
-        piece_count = 0
-        for r in range(8):
-            for c in range(8):
-                piece = grid[r][c]
-                if piece and piece.__class__.__name__ != "King":
-                    piece_count += 1
-        if piece_count == 0:
-            return True                
+        if self.is_fifty_move_draw():
+            return True
+
+        if self.is_threefold_repetition():
+            return True
+
+        if self.is_insufficient_material():
+            return True
 
         return False
 
@@ -431,8 +461,57 @@ class GameState:
         current = self.position_key()
         return self.position_history.count(current) >= 3
 
-    def is_fifty_move_draw(self):
-        return self.halfmove_clock >= 100
+    def position_key(self):
+        pieces = []
+        for r in range(8):
+            for c in range(8):
+                p = self.board.grid[r][c]
+                if p:
+                    pieces.append(f"{p.color}{p.__class__.__name__}{r}{c}")
+        return (
+            tuple(sorted(pieces)),
+            self.turn,
+            self.en_passant_target
+        )
+
+    def setup_promotion_perft(self):
+        self.board.grid = [[None for _ in range(8)] for _ in range(8)]
+
+        # White pawn on 7th rank
+        pawn = Pawn('w', 1, 0)   # a7
+        self.board.grid[1][0] = pawn
+
+        # Black piece to capture on promotion square
+        rook = Rook('b', 0, 1)   # b8
+        self.board.grid[0][1] = rook
+
+        # Kings (mandatory)
+        wk = King('w', 7, 4)
+        bk = King('b', 0, 4)
+
+        self.board.grid[7][4] = wk
+        self.board.grid[0][4] = bk
+
+        self.turn = 'w'
+        self.move_history.clear()
+        self.en_passant_target = None
+
+    def setup_promotion_test(self):
+        self.board.grid = [[None for _ in range(8)] for _ in range(8)]
+
+        # White pawn ready to promote
+        pawn = Pawn('w', 1, 0)
+        self.board.grid[1][0] = pawn
+
+        # Kings (required for legality)
+        wk = King('w', 7, 4)
+        bk = King('b', 0, 4)
+        self.board.grid[7][4] = wk
+        self.board.grid[0][4] = bk
+
+        self.turn = 'w'
+        self.move_history.clear()
+        self.en_passant_target = None
 
     def undo_move(self):
         if not self.move_history:
@@ -489,57 +568,35 @@ class GameState:
             pawn.has_moved = record.piece_has_moved
             self.board.grid[record.from_row][record.from_col] = pawn
 
-    def position_key(self):
-        pieces = []
-        for r in range(8):
-            for c in range(8):
-                p = self.board.grid[r][c]
-                if p:
-                    pieces.append(f"{p.color}{p.__class__.__name__}{r}{c}")
-        return (
-            tuple(sorted(pieces)),
-            self.turn,
-            self.en_passant_target
-        )
+def perft(game, depth):
+    if depth == 0:
+        return 1
 
-    def setup_promotion_test(self):
-        self.board.grid = [[None for _ in range(8)] for _ in range(8)]
+    nodes = 0
+    moves = game.get_legal_moves()
 
-        # White pawn ready to promote
-        pawn = Pawn('w', 1, 0)
-        self.board.grid[1][0] = pawn
+    for piece, r, c in moves:
+        game.make_move(piece, r, c, simulate=True)
 
-        # Kings (required for legality)
-        wk = King('w', 7, 4)
-        bk = King('b', 0, 4)
-        self.board.grid[7][4] = wk
-        self.board.grid[0][4] = bk
+        nodes += perft(game, depth - 1)
+        game.undo_move()
 
-        self.turn = 'w'
-        self.move_history.clear()
-        self.en_passant_target = None
+    return nodes
 
-    def setup_promotion_perft(self):
-        self.board.grid = [[None for _ in range(8)] for _ in range(8)]
+def perft_divide(game, depth):
+    results = {}
+    moves = game.get_legal_moves()
 
-        # White pawn on 7th rank
-        pawn = Pawn('w', 1, 0)   # a7
-        self.board.grid[1][0] = pawn
+    for piece, r, c in moves:
+        game.make_move(piece, r, c, simulate=True)
 
-        # Black piece to capture on promotion square
-        rook = Rook('b', 0, 1)   # b8
-        self.board.grid[0][1] = rook
+        count = perft(game, depth - 1)
+        game.undo_move()
 
-        # Kings (mandatory)
-        wk = King('w', 7, 4)
-        bk = King('b', 0, 4)
+        move_str = f"{piece.__class__.__name__[0]}{piece.col}{piece.row}->{c}{r}"
+        results[move_str] = count
 
-        self.board.grid[7][4] = wk
-        self.board.grid[0][4] = bk
-
-        self.turn = 'w'
-        self.move_history.clear()
-        self.en_passant_target = None
+    return results
 
 def perft_promotion(game, depth):
     if depth == 0:
@@ -585,35 +642,5 @@ def perft_promotion_divide(game, depth):
             count = perft_promotion(game, depth - 1)
             game.undo_move()
             results[f"{piece}"] = count
-
-    return results
-
-def perft(game, depth):
-    if depth == 0:
-        return 1
-
-    nodes = 0
-    moves = game.get_legal_moves()
-
-    for piece, r, c in moves:
-        game.make_move(piece, r, c, simulate=True)
-
-        nodes += perft(game, depth - 1)
-        game.undo_move()
-
-    return nodes
-
-def perft_divide(game, depth):
-    results = {}
-    moves = game.get_legal_moves()
-
-    for piece, r, c in moves:
-        game.make_move(piece, r, c, simulate=True)
-
-        count = perft(game, depth - 1)
-        game.undo_move()
-
-        move_str = f"{piece.__class__.__name__[0]}{piece.col}{piece.row}->{c}{r}"
-        results[move_str] = count
 
     return results
