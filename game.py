@@ -461,6 +461,65 @@ class GameState:
         current = self.position_key()
         return self.position_history.count(current) >= 3
 
+    def move_to_san(self, piece, to_row, to_col, promotion=None):
+        # Castling
+        if isinstance(piece, King) and abs(to_col - piece.col) == 2:
+            return "O-O" if to_col == 6 else "O-O-O"
+
+        san = ""
+
+        # Piece letter
+        if not isinstance(piece, Pawn):
+            if isinstance(piece, Knight):
+                san += "N"
+            else:
+                san += piece.__class__.__name__[0]
+
+        # Disambiguation
+        same_pieces = []
+        for p, r, c in self.get_legal_moves():
+            if p != piece and type(p) == type(piece) and (r, c) == (to_row, to_col):
+                same_pieces.append(p)
+
+        if same_pieces:
+            same_file = any(p.col == piece.col for p in same_pieces)
+            same_rank = any(p.row == piece.row for p in same_pieces)
+
+            if not same_file:
+                san += chr(ord('a') + piece.col)
+            elif not same_rank:
+                san += str(8 - piece.row)
+            else:
+                san += chr(ord('a') + piece.col)
+                san += str(8 - piece.row)
+
+        # Capture
+        is_capture = self.board.grid[to_row][to_col] is not None
+        if isinstance(piece, Pawn) and self.en_passant_target == (to_row, to_col):
+            is_capture = True
+
+        if isinstance(piece, Pawn) and is_capture:
+            san += chr(ord('a') + piece.col)
+
+        if is_capture:
+            san += "x"
+
+        # Destination
+        san += chr(ord('a') + to_col)
+        san += str(8 - to_row)
+
+        # Promotion
+        if promotion:
+            san += "=" + promotion.upper()
+
+        # Check / mate
+        self.make_move(piece, to_row, to_col, simulate=True, promotion=promotion)
+        if self.is_in_check(self.turn):
+            san += "#" if not self.get_legal_moves() else "+"
+        self.undo_move()
+
+        return san
+
     def position_key(self):
         pieces = []
         for r in range(8):

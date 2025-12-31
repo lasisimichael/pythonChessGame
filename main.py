@@ -98,7 +98,9 @@ def main():
 
                 else:
                     if (row, col) in legal_targets:
+                        san = game.move_to_san(selected_piece, row, col)
                         game.make_move(selected_piece, row, col)
+                        print(san)
                         last_move_square = (row, col)
 
                     if game.is_checkmate(game.turn) or game.is_stalemate(game.turn):
