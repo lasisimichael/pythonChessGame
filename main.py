@@ -99,11 +99,11 @@ def main():
                 else:
                     if (row, col) in legal_targets:
                         game.make_move(selected_piece, row, col)
+                        last_move_square = (row, col)
 
                     if game.is_checkmate(game.turn) or game.is_stalemate(game.turn):
                         game_over = True
 
-                        last_move_square = (row, col)
                         selected_piece = None
                         legal_targets = []
 

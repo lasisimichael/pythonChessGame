@@ -36,17 +36,19 @@ class MoveRecord:
         self.rook_has_moved = False
         self.was_promotion = was_promotion
         self.promoted_piece = promoted_piece
+        self.position_key = None
         self.turn = None
 
 class GameState:
     def __init__(self):
-        self.board = Board()
         self.turn = 'w'
-        self.move_history = []
-        self.en_passant_target = None
-        self.promotion_pending = None
+        self.board = Board()
         self.halfmove_clock = 0
         self.fullmove_number = 1
+        self.move_history = []
+        self.position_history = []
+        self.en_passant_target = None
+        self.promotion_pending = None
 
     def get_pseudo_legal_moves(self):
         moves = []
@@ -138,7 +140,6 @@ class GameState:
 
         # Move the piece normally
         self.board.move_piece(piece, to_row, to_col)
-        piece.has_moved = True
 
         if isinstance(piece, King):
             if abs(to_col - from_col) == 2:
@@ -150,7 +151,6 @@ class GameState:
             self.en_passant_target = (ep_row, to_col)
         else:
             self.en_passant_target = None
-
 
         # Promotion
         if isinstance(piece, Pawn) and (to_row == 0 or to_row == 7):
@@ -183,6 +183,13 @@ class GameState:
         if not simulate:
             if self.turn == 'w':
                 self.fullmove_number += 1
+            record.position_key = self.position_key()
+            self.position_history.append(record.position_key)
+            if isinstance(piece, Pawn) or captured is not None:
+                self.halfmove_clock = 0
+            else :
+                self.halfmove_clock += 1
+            piece.has_moved = True
 
     def castle_rook(self, king, king_target_col):
         row = king.row
@@ -403,9 +410,9 @@ class GameState:
 
         self.turn = current_turn
 
-        if len(legal_moves) == 0:
+        if len(legal_moves) == 0 or self.is_fifty_move_draw() or self.is_threefold_repetition():
             return True
-        
+
         grid = self.board.grid
         piece_count = 0
         for r in range(8):
@@ -418,11 +425,24 @@ class GameState:
 
         return False
 
+    def is_threefold_repetition(self):
+        if self.promotion_pending:
+            return False
+        current = self.position_key()
+        return self.position_history.count(current) >= 3
+
+    def is_fifty_move_draw(self):
+        return self.halfmove_clock >= 100
+
     def undo_move(self):
         if not self.move_history:
             return
 
         record = self.move_history.pop()
+
+        if record.position_key:
+            self.position_history.pop()
+
         self.fullmove_number = record.fullmove_number
         piece = record.piece
 
@@ -468,6 +488,19 @@ class GameState:
             pawn.col = record.from_col
             pawn.has_moved = record.piece_has_moved
             self.board.grid[record.from_row][record.from_col] = pawn
+
+    def position_key(self):
+        pieces = []
+        for r in range(8):
+            for c in range(8):
+                p = self.board.grid[r][c]
+                if p:
+                    pieces.append(f"{p.color}{p.__class__.__name__}{r}{c}")
+        return (
+            tuple(sorted(pieces)),
+            self.turn,
+            self.en_passant_target
+        )
 
     def setup_promotion_test(self):
         self.board.grid = [[None for _ in range(8)] for _ in range(8)]
