@@ -29,9 +29,10 @@ def main():
     selected_piece = None
     legal_targets = []
     last_move_square = None
+    last_move_square_prev_square = None
 
     pygame.init()
-    window = pygame.display.set_mode((576, 640))
+    window = pygame.display.set_mode((800, 640))
 
     game = GameState()
 
@@ -43,15 +44,17 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-            if event.type == pygame.QUIT:
-                running = False
-
             if event.type == pygame.KEYDOWN:
+                # Undo move
                 if event.key == pygame.K_u:
                     handle_undo(game)
                     selected_piece = None
                     legal_targets = []
                     last_move_square = None
+
+                # Save PGN file
+                if event.key == pygame.K_s:
+                    game.export_pgn()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if game.promotion_pending:
@@ -98,12 +101,17 @@ def main():
 
                 else:
                     if (row, col) in legal_targets:
-                        san = game.move_to_san(selected_piece, row, col)
                         game.make_move(selected_piece, row, col)
-                        print(san)
-                        last_move_square = (row, col)
 
-                    if game.is_checkmate(game.turn) or game.is_stalemate(game.turn):
+                        last_move = game.move_history[-1] if game.move_history else None
+                        if last_move:
+                            last_move_square = (last_move.to_row, last_move.to_col)
+                            last_move_square_prev_square = (last_move.from_row, last_move.from_col)
+                        else:
+                            last_move_square = None
+                            last_move_square_prev_square = None
+
+                    if game.game_over:
                         game_over = True
 
                         selected_piece = None
@@ -120,23 +128,32 @@ def main():
                         selected_piece = None
                         legal_targets = []
         
-        status_text = ""
-        if game.is_checkmate(game.turn):
-            winner = "White" if game.turn == 'b' else "Black"
-            status_text = f"Checkmate! {winner} wins"
+        status = game.get_game_status()
 
-        elif game.is_stalemate(game.turn):
-            status_text = "Stalemate"
-
-        elif game.is_in_check(game.turn):
-            side = "White" if game.turn == 'w' else "Black"
-            status_text = f"{side} is in check"
-
+        if status:
+            kind, winner = status
+            if kind == "checkmate":
+                status_text = f"Checkmate! {'White' if winner == 'w' else 'Black'} wins"
+            elif kind == "stalemate":
+                status_text = "Stalemate"
+            elif kind == "fifty-move":
+                status_text = "Draw by 50-move rule"
+            elif kind == "threefold":
+                status_text = "Draw by repetition"
+            elif kind == "insufficient":
+                status_text = "Draw by insufficient material"
         else:
             side = "White" if game.turn == 'w' else "Black"
             status_text = f"{side} to move"
 
         renderer.draw_board()
+
+        renderer.draw_move_list(
+            game.san_history,
+            start_x=renderer.board_x + 8 * renderer.square_size + 42 ,
+            start_y=20,
+            height=renderer.square_size * 8
+        )
 
         if legal_targets:
             renderer.highlight_moves(legal_targets)
@@ -144,6 +161,9 @@ def main():
         if last_move_square:
             r, c = last_move_square
             renderer.highlight_square(r, c)
+
+            r, c = last_move_square_prev_square
+            renderer.highlight_square(r, c, color=(255, 255, 255))
 
         if game.is_in_check(game.turn):
             king_pos = game.find_king(game.turn)
@@ -157,6 +177,7 @@ def main():
             renderer.draw_status_bar(status_text, can_undo=True)
 
         if game_over:
+            game.export_pgn()
             renderer.dim_board()
             renderer.draw_restart_prompt()
 

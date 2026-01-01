@@ -82,7 +82,7 @@ class Renderer:
 
     def draw_status_bar(self, status_text, can_undo=False):
         bar_height = 64
-        y = self.board_y + 8 * self.square_size
+        y = self.status_y
 
         # Background
         pygame.draw.rect(
@@ -212,3 +212,30 @@ class Renderer:
             if rect.collidepoint(pos):
                 return piece
         return None
+
+    def draw_move_list(self, san_history, start_x, start_y, height):
+        panel_width = self.window.get_width() - start_x - 10
+
+        pygame.draw.rect(
+            self.window,
+            (30, 30, 30),
+            (start_x - 8, start_y - 8, panel_width, height + 16),
+            border_radius=6
+        )
+
+        font = pygame.font.SysFont(None, 24)
+        line_height = 22
+        max_lines = height // line_height
+
+        moves = []
+        for i in range(0, len(san_history), 2):
+            white = san_history[i]
+            black = san_history[i+1] if i+1 < len(san_history) else ""
+            moves.append(f"{i//2 + 1}. {white:<6} {black}")
+
+        # Scroll last moves into view
+        moves = moves[-max_lines:]
+
+        for i, text in enumerate(moves):
+            surf = font.render(text, True, (230, 230, 230))
+            self.window.blit(surf, (start_x, start_y + i * line_height))
