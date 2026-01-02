@@ -39,7 +39,7 @@ class King(ChessPiece):
                 if target is None or target.color != self.color:
                     moves.append((new_row, new_col))
 
-        game_state._add_castling_moves(self, moves)
+        game_state.add_castling_moves(self, moves)
 
         return moves
 

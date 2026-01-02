@@ -54,7 +54,7 @@ class GameState:
         self.en_passant_target = None
         self.promotion_pending = None
 
-    def _add_castling_moves(self, king, moves):
+    def add_castling_moves(self, king, moves):
         if king.has_moved:
             return
 
@@ -81,6 +81,18 @@ class GameState:
                 not self.is_square_attacked(row, 3, enemy) and \
                 not self.is_square_attacked(row, 2, enemy):
                     moves.append((row, 2))
+
+    def apply_parsed_san(self, parsed):
+        if parsed[0] == "castle":
+            _, king, r, c = parsed
+            self.make_move(king, r, c)
+            return
+
+        _, piece, r, c, promo = parsed
+        self.make_move(piece, r, c)
+
+        if promo:
+            self.promote_pawn(piece, promo)
 
     def castle_rook(self, king, king_target_col):
         row = king.row
@@ -621,6 +633,66 @@ class GameState:
         san += self.gives_check(record)
 
         return san
+
+    def parse_san(self, san):
+        san = san.replace("+", "").replace("#", "")
+
+        # Castling
+        if san == "O-O":
+            king_row, king_col = self.find_king(self.turn)
+            king = self.board.grid[king_row][king_col]
+            return ("castle", king, 7, 6)
+        if san == "O-O-O":
+            king_row, king_col = self.find_king(self.turn)
+            king = self.board.grid[king_row][king_col]
+            return ("castle", king, 7, 2)
+
+        promotion = None
+        if "=" in san:
+            san, promotion = san.split("=")
+            promotion = promotion.lower()
+
+        is_capture = "x" in san
+
+        # Piece type
+        piece_map = {
+            "N": Knight,
+            "B": Bishop,
+            "R": Rook,
+            "Q": Queen,
+            "K": King
+        }
+
+        if san[0].isupper():
+            piece_cls = piece_map[san[0]]
+            san = san[1:]
+        else:
+            piece_cls = Pawn
+
+        san = san.replace("x", "")
+
+        to_col = ord(san[-2]) - ord('a')
+        to_row = 8 - int(san[-1])
+
+        disamb = san[:-2]
+
+        candidates = []
+        for p, r, c in self.get_legal_moves():
+            if isinstance(p, piece_cls) and (r, c) == (to_row, to_col):
+                candidates.append(p)
+
+        if disamb:
+            if disamb.isdigit():
+                candidates = [p for p in candidates if p.row == 8 - int(disamb)]
+            elif disamb.isalpha():
+                candidates = [p for p in candidates if p.col == ord(disamb) - ord('a')]
+            elif disamb.isalnum():
+                candidates = [p for p in candidates if p.row == 8 - int(disamb[1]) and p.col == ord(disamb[0]) - ord('a')]
+
+        assert len(candidates) == 1, f"Ambiguous SAN: {san}"
+        piece = candidates[0]
+
+        return ("move", piece, to_row, to_col, promotion)
 
     def position_key(self):
         pieces = []
