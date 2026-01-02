@@ -163,7 +163,7 @@ def main():
             renderer.highlight_square(r, c)
 
             r, c = last_move_square_prev_square
-            renderer.highlight_square(r, c, color=(255, 255, 255))
+            renderer.highlight_square(r, c, color=(255, 0, 255))
 
         if game.is_in_check(game.turn):
             king_pos = game.find_king(game.turn)

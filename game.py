@@ -102,34 +102,48 @@ class GameState:
 
     def disambiguation(self, record):
         piece = record.piece
+        target = (record.to_row, record.to_col)
+
         conflicts = []
 
+        # Save state
         saved_turn = self.turn
-        self.turn = piece.color   # 👈 critical
+        saved_from = (piece.row, piece.col)
+        captured = record.captured or record.ep_captured
+
+        # TEMPORARILY UNDO MOVE
+        self.board.grid[record.from_row][record.from_col] = piece
+        self.board.grid[record.to_row][record.to_col] = captured
+        piece.row, piece.col = record.from_row, record.from_col
+        self.turn = piece.color
 
         for p, r, c in self.get_pseudo_legal_moves():
             if p is piece:
                 continue
-            if type(p) is type(piece) and (r, c) == (record.to_row, record.to_col):
+            if type(p) is type(piece) and (r, c) == target:
                 if self.is_legal(p, r, c):
                     conflicts.append(p)
 
+        # RESTORE MOVE
+        self.board.grid[record.from_row][record.from_col] = None
+        self.board.grid[record.to_row][record.to_col] = piece
+        piece.row, piece.col = record.to_row, record.to_col
         self.turn = saved_turn
 
         if not conflicts:
             return ""
 
-        same_file = any(p.col == record.from_col for p in conflicts)
-        same_rank = any(p.row == record.from_row for p in conflicts)
+        files = {p.col for p in conflicts}
+        ranks = {p.row for p in conflicts}
 
-        if not same_file:
-            return chr(ord('a') + record.from_col)
-        if not same_rank:
+        need_file = record.from_col in files
+        need_rank = record.from_row in ranks
+
+        if need_file and need_rank:
+            return chr(ord('a') + record.from_col) + str(8 - record.from_row)
+        if need_file:
             return str(8 - record.from_row)
-        return (
-            chr(ord('a') + record.from_col)
-            + str(8 - record.from_row)
-        )
+        return chr(ord('a') + record.from_col)
 
     def export_pgn(self, filename="game.pgn"):
         from datetime import date
@@ -232,24 +246,20 @@ class GameState:
         return "1/2-1/2"
 
     def gives_check(self, record):
-        saved_turn = self.turn
+        # We are already on the final position for real moves
+        enemy = 'b' if record.turn == 'w' else 'w'
 
-        self.make_move(
-            record.promoted_piece if record.promoted_piece else record.piece,
-            record.to_row,
-            record.to_col,
-            simulate=True,
-            promotion=record.promo_letter
-        )
-
-        in_check = self.is_in_check(self.turn)
-        legal = self.get_legal_moves()
-
-        self.undo_move()
-        self.turn = saved_turn
+        in_check = self.is_in_check(enemy)
 
         if not in_check:
             return ""
+
+        # Check if opponent has legal replies
+        saved_turn = self.turn
+        self.turn = enemy
+        legal = self.get_legal_moves()
+        self.turn = saved_turn
+
         return "#" if not legal else "+"
 
     def is_castling_legal(self, king, to_row, to_col):
@@ -502,8 +512,6 @@ class GameState:
         record.turn = self.turn
 
         self.move_history.append(record)
-        if not simulate:
-            san = self.move_to_san(record)
 
         # Move the piece normally
         self.board.move_piece(piece, to_row, to_col)
@@ -549,13 +557,15 @@ class GameState:
         self.turn = 'b' if self.turn == 'w' else 'w'
 
         if not simulate:
+            san = self.move_to_san(record)
+            self.san_history.append(san)
+
             if self.turn == 'w':
                 self.fullmove_number += 1
 
             if not record.was_promotion:
                 record.position_key = self.position_key()
                 self.position_history.append(record.position_key)
-
 
             if record.was_promotion and record.promoted_piece:
                 PROMO_MAP = {
@@ -565,8 +575,6 @@ class GameState:
                     Knight: "N"
                 }
                 record.promo_letter = PROMO_MAP[type(record.promoted_piece)].lower()
-
-            self.san_history.append(san)
 
             if isinstance(piece, Pawn) or captured is not None:
                 self.halfmove_clock = 0

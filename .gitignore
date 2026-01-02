@@ -4,3 +4,4 @@ venv/
 .env
 .rmv/
 .vscode/
+game.pgn

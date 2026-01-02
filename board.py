@@ -49,3 +49,6 @@ class Board:
         self.grid[to_row][to_col] = piece
         piece.move_to(to_row, to_col)
         piece.has_moved = True
+
+    def clear(self):
+        self.grid = [[None for _ in range(8)] for _ in range(8)]
