@@ -1,4 +1,5 @@
 from board import Board
+from pgn import tokenize_pgn
 from pieces import King, Queen, Rook, Bishop, Knight, Pawn
 
 class MoveRecord:
@@ -477,6 +478,14 @@ class GameState:
             return False
         current = self.position_key()
         return self.position_history.count(current) >= 3
+
+    def load_pgn(self, pgn_text: str):
+            assert not self.move_history, "GameState must be empty before loading PGN"
+            tokens = tokenize_pgn(pgn_text)
+
+            for san in tokens:
+                parsed = self.parse_san(san)
+                self.apply_parsed_san(parsed)
 
     def make_move(self, piece, to_row, to_col, simulate=False, promotion = None):
         from_row, from_col = piece.row, piece.col
