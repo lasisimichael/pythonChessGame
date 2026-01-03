@@ -16,7 +16,7 @@ class MoveRecord:
         rook_to=None,
         ep_captured=None,
         piece_has_moved=False,
-        simulate=False
+        dry_run=False
     ):
         self.piece = piece
         self.from_row = from_row
@@ -31,8 +31,9 @@ class MoveRecord:
         self.rook_to = rook_to
         self.ep_captured = ep_captured
         self.piece_has_moved = piece_has_moved
-        self.simulate = simulate
+        self.dry_run = dry_run
         self.fullmove_number = 0
+        self.halfmove_clock = None
         self.rook_has_moved = False
         self.was_promotion = None
         self.promoted_piece = None
@@ -114,6 +115,10 @@ class GameState:
         return self.is_in_check(self.turn)
 
     def disambiguation(self, record):
+        captured = record.captured or record.ep_captured
+        if record.was_promotion:
+            captured = record.piece
+
         piece = record.piece
         target = (record.to_row, record.to_col)
 
@@ -122,7 +127,6 @@ class GameState:
         # Save state
         saved_turn = self.turn
         saved_from = (piece.row, piece.col)
-        captured = record.captured or record.ep_captured
 
         # TEMPORARILY UNDO MOVE
         self.board.grid[record.from_row][record.from_col] = piece
@@ -181,6 +185,28 @@ class GameState:
 
         with open(filename, "w") as f:
             f.write(pgn)
+
+    def finalize_real_move(self, record):
+        san = self.move_to_san(record)
+        self.san_history.append(san)
+
+        if self.turn == 'w':
+            self.fullmove_number += 1
+
+        record.position_key = self.position_key()
+        self.position_history.append(record.position_key)
+
+        record.halfmove_clock = self.halfmove_clock
+        if isinstance(record.piece, Pawn) or record.captured:
+            self.halfmove_clock = 0
+        else:
+            self.halfmove_clock += 1
+
+        status = self.get_game_status()
+        if status:
+            self.game_over = True
+            self.game_end_reason, _ = status
+            self.game_result = self.get_result()
 
     def find_king(self, color):
         for r in range(8):
@@ -487,7 +513,7 @@ class GameState:
                 parsed = self.parse_san(san)
                 self.apply_parsed_san(parsed)
 
-    def make_move(self, piece, to_row, to_col, simulate=False, promotion = None):
+    def make_move(self, piece, to_row, to_col, dry_run=False, promotion = None):
         from_row, from_col = piece.row, piece.col
         captured = self.board.grid[to_row][to_col]
         old_ep = self.en_passant_target
@@ -526,7 +552,7 @@ class GameState:
             rook, rook_from, rook_to,
             ep_captured,
             piece_had_moved,
-            simulate=simulate
+            dry_run=dry_run
         )
         record.fullmove_number = self.fullmove_number
         record.rook_has_moved = rook_had_moved
@@ -536,6 +562,7 @@ class GameState:
 
         # Move the piece normally
         self.board.move_piece(piece, to_row, to_col)
+        piece.has_moved = True
 
         if isinstance(piece, King):
             if abs(to_col - from_col) == 2:
@@ -553,7 +580,7 @@ class GameState:
             record.was_promotion = True
             record.promoted_piece = None
 
-            if simulate:
+            if dry_run:
                 cls = {
                     'q': Queen,
                     'r': Rook,
@@ -577,37 +604,8 @@ class GameState:
         # Update turn
         self.turn = 'b' if self.turn == 'w' else 'w'
 
-        if not simulate:
-            san = self.move_to_san(record)
-            self.san_history.append(san)
-
-            if self.turn == 'w':
-                self.fullmove_number += 1
-
-            if not record.was_promotion:
-                record.position_key = self.position_key()
-                self.position_history.append(record.position_key)
-
-            if record.was_promotion and record.promoted_piece:
-                PROMO_MAP = {
-                    Queen: "Q",
-                    Rook: "R",
-                    Bishop: "B",
-                    Knight: "N"
-                }
-                record.promo_letter = PROMO_MAP[type(record.promoted_piece)].lower()
-
-            if isinstance(piece, Pawn) or captured is not None:
-                self.halfmove_clock = 0
-            else :
-                self.halfmove_clock += 1
-            piece.has_moved = True
-
-            status = self.get_game_status()
-            if status:
-                self.game_over = True
-                self.game_end_reason, winner = status
-                self.game_result = self.get_result()
+        if not dry_run and not record.was_promotion:
+            self.finalize_real_move(record)
 
     def move_to_san(self, record):
         piece = record.piece
@@ -650,11 +648,14 @@ class GameState:
         if san == "O-O":
             king_row, king_col = self.find_king(self.turn)
             king = self.board.grid[king_row][king_col]
-            return ("castle", king, 7, 6)
+            row = 7 if self.turn == 'w' else 0
+            return ("castle", king, row, 6)
         if san == "O-O-O":
             king_row, king_col = self.find_king(self.turn)
             king = self.board.grid[king_row][king_col]
-            return ("castle", king, 7, 2)
+            row = 7 if self.turn == 'w' else 0
+            return ("castle", king, row, 2)
+
 
         promotion = None
         if "=" in san:
@@ -735,36 +736,16 @@ class GameState:
 
         # Replace pawn on board
         self.board.grid[row][col] = promoted
-
+        
         # Update record
         record.promoted_piece = promoted
         record.promo_letter = piece_type.lower()
 
-        # Clear UI state
         self.promotion_pending = None
 
-        # Finalize turn (this was skipped earlier)
+        # Finalize move cleanly
         self.turn = 'b' if self.turn == 'w' else 'w'
-        if self.turn == 'w':
-            self.fullmove_number += 1
-
-        # Position tracking
-        record.position_key = self.position_key()
-        self.position_history.append(record.position_key)
-
-        # SAN
-        san = self.move_to_san(record)
-        self.san_history.append(san)
-
-        # Halfmove clock resets (pawn move)
-        self.halfmove_clock = 0
-
-        # End-of-game detection
-        status = self.get_game_status()
-        if status:
-            self.game_over = True
-            self.game_end_reason, winner = status
-            self.game_result = self.get_result()
+        self.finalize_real_move(record)
 
     def setup_promotion_perft(self):
         self.board.grid = [[None for _ in range(8)] for _ in range(8)]
@@ -812,13 +793,14 @@ class GameState:
         record = self.move_history.pop()
 
         # REMOVE SAN ONLY FOR REAL MOVES
-        if not record.simulate and self.san_history:
+        if not record.dry_run and self.san_history:
             self.san_history.pop()
 
         if record.position_key:
             self.position_history.pop()
 
         self.fullmove_number = record.fullmove_number
+        self.halfmove_clock = record.halfmove_clock
         piece = record.piece
 
         # Restore en passant target
@@ -879,7 +861,7 @@ def perft(game, depth):
     moves = game.get_legal_moves()
 
     for piece, r, c in moves:
-        game.make_move(piece, r, c, simulate=True)
+        game.make_move(piece, r, c, dry_run=True)
 
         nodes += perft(game, depth - 1)
         game.undo_move()
@@ -891,7 +873,7 @@ def perft_divide(game, depth):
     moves = game.get_legal_moves()
 
     for piece, r, c in moves:
-        game.make_move(piece, r, c, simulate=True)
+        game.make_move(piece, r, c, dry_run=True)
 
         count = perft(game, depth - 1)
         game.undo_move()
@@ -912,11 +894,11 @@ def perft_promotion(game, depth):
 
         if is_promo:
             for promo in ['q', 'r', 'b', 'n']:
-                game.make_move(piece, r, c, simulate=True, promotion=promo)
+                game.make_move(piece, r, c, dry_run=True, promotion=promo)
                 nodes += perft_promotion(game, depth - 1)
                 game.undo_move()
         else:
-            game.make_move(piece, r, c, simulate=True)
+            game.make_move(piece, r, c, dry_run=True)
             nodes += perft_promotion(game, depth - 1)
             game.undo_move()
 
@@ -928,7 +910,7 @@ def perft_promotion_divide(game, depth):
     for piece, r, c in game.get_legal_moves():
         if isinstance(piece, Pawn) and (r == 0 or r == 7):
             for promo in ['q', 'r', 'b', 'n']:
-                game.make_move(piece, r, c, simulate=True, promotion=promo)
+                game.make_move(piece, r, c, dry_run=True, promotion=promo)
                 count = perft_promotion(game, depth - 1)
                 game.undo_move()
 
@@ -941,7 +923,7 @@ def perft_promotion_divide(game, depth):
 
                 results[key] = count
         else:
-            game.make_move(piece, r, c, simulate=True)
+            game.make_move(piece, r, c, dry_run=True)
             count = perft_promotion(game, depth - 1)
             game.undo_move()
             results[f"{piece}"] = count
