@@ -33,7 +33,9 @@ class MoveRecord:
         self.piece_has_moved = piece_has_moved
         self.dry_run = dry_run
         self.fullmove_number = 0
-        self.halfmove_clock = None
+        self.halfmove_clock = 0
+        self.post_fullmove = 0
+        self.post_halfmove = 0
         self.rook_has_moved = False
         self.was_promotion = None
         self.promoted_piece = None
@@ -50,6 +52,7 @@ class GameState:
         self.game_end_reason = None
         self.halfmove_clock = 0
         self.fullmove_number = 1
+        self.redo_stack = []
         self.san_history = []
         self.move_history = []
         self.position_history = []
@@ -207,6 +210,9 @@ class GameState:
             self.game_over = True
             self.game_end_reason, _ = status
             self.game_result = self.get_result()
+
+        record.post_fullmove = self.fullmove_number
+        record.post_halfmove = self.halfmove_clock
 
     def find_king(self, color):
         for r in range(8):
@@ -514,6 +520,9 @@ class GameState:
                 self.apply_parsed_san(parsed)
 
     def make_move(self, piece, to_row, to_col, dry_run=False, promotion = None):
+        if not dry_run:
+                self.redo_stack.clear()
+
         from_row, from_col = piece.row, piece.col
         captured = self.board.grid[to_row][to_col]
         old_ep = self.en_passant_target
@@ -744,7 +753,37 @@ class GameState:
         self.promotion_pending = None
 
         # Finalize move cleanly
-        self.turn = 'b' if self.turn == 'w' else 'w'
+        self.turn = 'b' if record.turn == 'w' else 'w'
+        self.finalize_real_move(record)
+
+    def redo_move(self):
+        if not self.redo_stack:
+            return
+
+        record = self.redo_stack.pop()
+
+        # Restore turn
+        self.turn = record.turn
+
+        # Reapply the move WITHOUT recording
+        self.make_move(
+            record.piece,
+            record.to_row,
+            record.to_col,
+            dry_run=True,
+            promotion=record.promo_letter
+        )
+
+        # Now convert that dry-run into a real move by restoring record
+        self.move_history.pop()          # remove dry-run record
+        record.dry_run = False
+        self.move_history.append(record)
+
+        # Promotion handling
+        if record.was_promotion:
+            self.board.grid[record.to_row][record.to_col] = record.promoted_piece
+
+        # Finalize move
         self.finalize_real_move(record)
 
     def setup_promotion_perft(self):
@@ -791,6 +830,9 @@ class GameState:
             return
 
         record = self.move_history.pop()
+
+        if not record.dry_run:
+                self.redo_stack.append(record)
 
         # REMOVE SAN ONLY FOR REAL MOVES
         if not record.dry_run and self.san_history:
