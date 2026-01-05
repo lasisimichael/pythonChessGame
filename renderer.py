@@ -9,6 +9,7 @@ class Renderer:
         self.square_size = 64
         self.images = {}
         self.status_height = 48
+        self.move_scroll_offset = 0
         self.status_y = self.board_y + 8 * self.square_size + 32
         self.status_font = pygame.font.SysFont("arial", 22, bold=True)
         self.font = pygame.font.SysFont("arial", 18)
@@ -233,8 +234,13 @@ class Renderer:
             black = san_history[i+1] if i+1 < len(san_history) else ""
             moves.append(f"{i//2 + 1}. {white:<6} {black}")
 
+        max_offset = max(0, len(moves) - max_lines)
+        self.move_scroll_offset = max(0, min(self.move_scroll_offset, max_offset))
+
         # Scroll last moves into view
-        moves = moves[-max_lines:]
+        start = self.move_scroll_offset
+        end = start + max_lines
+        moves = moves[start:end]
 
         for i, text in enumerate(moves):
             surf = font.render(text, True, (230, 230, 230))

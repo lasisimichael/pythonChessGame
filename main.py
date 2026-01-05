@@ -56,6 +56,9 @@ def main():
                 if event.key == pygame.K_s:
                     game.export_pgn()
 
+            if event.type == pygame.MOUSEWHEEL:
+                renderer.move_scroll_offset -= event.y
+
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if game.promotion_pending:
                     choice = renderer.handle_promotion_click(event.pos)
@@ -147,6 +150,7 @@ def main():
             status_text = f"{side} to move"
 
         renderer.draw_board()
+        renderer.move_scroll_offset = 10**9
 
         renderer.draw_move_list(
             game.san_history,
@@ -155,15 +159,15 @@ def main():
             height=renderer.square_size * 8
         )
 
-        if legal_targets:
-            renderer.highlight_moves(legal_targets)
-
         if last_move_square:
             r, c = last_move_square
             renderer.highlight_square(r, c)
 
             r, c = last_move_square_prev_square
             renderer.highlight_square(r, c, color=(255, 0, 255))
+
+        if legal_targets:
+            renderer.highlight_moves(legal_targets)
 
         if game.is_in_check(game.turn):
             king_pos = game.find_king(game.turn)
