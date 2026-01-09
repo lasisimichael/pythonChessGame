@@ -8,6 +8,9 @@ class Renderer:
         self.board_y = 32
         self.square_size = 64
         self.images = {}
+        self.button_height = 32
+        self.button_width = 90
+        self.button_padding = 10
         self.status_height = 48
         self.move_scroll_offset = 0
         self.status_y = self.board_y + 8 * self.square_size + 32
@@ -92,21 +95,11 @@ class Renderer:
             (0, y, self.window.get_width(), bar_height)
         )
 
-        if can_undo:
-            full_text = f"{status_text}   •   [U] Undo"
-        else:
-            full_text = status_text
-
         # Text
         font = pygame.font.SysFont(None, 28)
         text_color = (240, 240, 240)
 
-        if can_undo:
-            full_text = f"{status_text}   •   [U] Undo"
-        else:
-            full_text = status_text
-
-        text_surface = font.render(full_text, True, text_color)
+        text_surface = font.render(status_text, True, text_color)
         text_rect = text_surface.get_rect()
 
         text_rect.centerx = self.window.get_width() // 2
@@ -245,3 +238,30 @@ class Renderer:
         for i, text in enumerate(moves):
             surf = font.render(text, True, (230, 230, 230))
             self.window.blit(surf, (start_x, start_y + i * line_height))
+
+    def draw_undo_redo_buttons(self, x, y, can_undo, can_redo):
+        font = pygame.font.SysFont(None, 22)
+
+        self.undo_rect = pygame.Rect(x, y, self.button_width, self.button_height)
+        self.redo_rect = pygame.Rect(
+            x + self.button_width + self.button_padding,
+            y,
+            self.button_width,
+            self.button_height
+        )
+
+        def draw_button(rect, text, enabled):
+            bg = (70, 70, 70) if enabled else (40, 40, 40)
+            fg = (230, 230, 230) if enabled else (120, 120, 120)
+
+            pygame.draw.rect(self.window, bg, rect, border_radius=6)
+            pygame.draw.rect(self.window, (120, 120, 120), rect, 1, border_radius=6)
+
+            label = font.render(text, True, fg)
+            self.window.blit(
+                label,
+                label.get_rect(center=rect.center)
+            )
+
+        draw_button(self.undo_rect, "[U] Undo", can_undo)
+        draw_button(self.redo_rect, "[R] Redo", can_redo)

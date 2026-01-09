@@ -24,6 +24,12 @@ def handle_undo(game):
 
     game.undo_move()
 
+def handle_redo(game):
+    if not game.redo_stack:
+        return
+
+    game.redo_move()
+
 def main():
     game_over = False
     selected_piece = None
@@ -45,21 +51,42 @@ def main():
                 running = False
 
             if event.type == pygame.KEYDOWN:
+                # Redo move
+                if event.key == pygame.K_r:
+                    handle_redo(game)
+                    selected_piece = None
+                    legal_targets = []
+
+                # Save PGN file
+                if event.key == pygame.K_s:
+                    game.export_pgn()
+
                 # Undo move
                 if event.key == pygame.K_u:
                     handle_undo(game)
                     selected_piece = None
                     legal_targets = []
                     last_move_square = None
-
-                # Save PGN file
-                if event.key == pygame.K_s:
-                    game.export_pgn()
+                    last_move_square_prev_square = None
 
             if event.type == pygame.MOUSEWHEEL:
-                renderer.move_scroll_offset -= event.y
+                renderer.move_scroll_offset -= event.y * 1
 
             if event.type == pygame.MOUSEBUTTONDOWN:
+                if hasattr(renderer, "undo_rect"):
+                    if renderer.undo_rect.collidepoint(event.pos) and game.move_history:
+                        handle_undo(game)
+                        selected_piece = None
+                        legal_targets = []
+                        last_move_square = None
+                        continue
+                if hasattr(renderer, "redo_rect"):
+                    if renderer.redo_rect.collidepoint(event.pos) and game.redo_stack:
+                        handle_redo(game)
+                        selected_piece = None
+                        legal_targets = []
+                        continue
+
                 if game.promotion_pending:
                     choice = renderer.handle_promotion_click(event.pos)
                     if choice:
@@ -105,6 +132,7 @@ def main():
                 else:
                     if (row, col) in legal_targets:
                         game.make_move(selected_piece, row, col)
+                        renderer.move_scroll_offset = 10**9  # Scroll to bottom
 
                         last_move = game.move_history[-1] if game.move_history else None
                         if last_move:
@@ -150,13 +178,27 @@ def main():
             status_text = f"{side} to move"
 
         renderer.draw_board()
-        renderer.move_scroll_offset = 10**9
 
+        move_list_height = (
+            renderer.square_size * 8
+            - renderer.button_height
+            - 12  # spacing between list and buttons
+        )
         renderer.draw_move_list(
             game.san_history,
             start_x=renderer.board_x + 8 * renderer.square_size + 42 ,
             start_y=20,
-            height=renderer.square_size * 8
+            height=move_list_height
+        )
+
+        buttons_y = 20 + move_list_height + 12
+        buttons_x = renderer.board_x + 8 * renderer.square_size + 42
+
+        renderer.draw_undo_redo_buttons(
+            buttons_x,
+            buttons_y,
+            can_undo=bool(game.move_history),
+            can_redo=bool(game.redo_stack)
         )
 
         if last_move_square:
