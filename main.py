@@ -83,7 +83,8 @@ def main():
                 if game_over:
                     game = GameState()
                     renderer = Renderer(window, game.board)
-
+                    selected_move_index = 0
+                    renderer.move_scroll_offset = 0
                     selected_piece = None
                     legal_targets = []
                     last_move_square = None
@@ -101,30 +102,25 @@ def main():
 
                     continue
 
-                clicked_index = renderer.get_clicked_move_index(event.pos)
-                if clicked_index is not None:
-                    white_ply, black_ply = clicked_index
+                clicked_ply = renderer.get_clicked_move_index(event.pos)
+                if clicked_ply is not None:
                     selected_piece = None
                     legal_targets = []
 
-                    target_ply = (
-                            black_ply
-                            if black_ply is not None and len(game.move_history) >= black_ply
-                            else white_ply
-                        )
-                    
                     current_index = len(game.move_history)
 
-                    while current_index > target_ply:
+                    while current_index > clicked_ply:
                         game.undo_move()
                         current_index -= 1
 
-                    while current_index < target_ply and game.redo_stack:
+                    while current_index < clicked_ply:
+                        if not game.redo_stack:
+                            break
                         game.redo_move()
                         current_index += 1
 
                     last_move_square, last_move_square_prev_square = sync_last_move(game)
-                    selected_move_index = target_ply
+                    selected_move_index = clicked_ply
                     continue
 
                 if hasattr(renderer, "undo_rect"):

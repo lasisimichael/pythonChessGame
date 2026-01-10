@@ -208,7 +208,7 @@ class Renderer:
         return None
 
     def draw_move_list(self, san_history, start_x, start_y, height, selected_index=None):
-        self.move_row_rects = []
+        self.move_move_rects = []
         panel_width = self.window.get_width() - start_x - 10
 
         pygame.draw.rect(
@@ -238,30 +238,61 @@ class Renderer:
 
         for i, text in enumerate(moves):
             row_y = start_y + i * line_height
-            rect = pygame.Rect(start_x - 4, row_y, panel_width - 8, line_height - 6)
-
             absolute_row_index = start + i  # move-number index (not ply)
 
             # Each row corresponds to two plies
             white_ply = absolute_row_index * 2 + 1
             black_ply = white_ply + 1 if white_ply < len(san_history) else None
 
-            if selected_index is not None:
-                if selected_index in (white_ply, black_ply):
-                    pygame.draw.rect(self.window, (60, 60, 90), rect, border_radius=4)
+            white_text = san_history[white_ply - 1] if white_ply - 1 < len(san_history) else ""
+            black_text = san_history[black_ply - 1] if black_ply - 1 < len(san_history) else ""
 
-            self.move_row_rects.append((rect, white_ply, black_ply))
+            col_gap = 10
+            white_x = start_x + 28
+            black_x = start_x + 120
 
-            surf = font.render(text, True, (230, 230, 230))
-            self.window.blit(surf, (start_x, row_y))
+            # --- MOVE NUMBER ---
+            num_surf = font.render(f"{absolute_row_index + 1}.", True, (180, 180, 180))
+            self.window.blit(num_surf, (start_x, row_y))
+
+            # --- WHITE MOVE ---
+            white_rect = pygame.Rect(
+                white_x - 4,
+                row_y,
+                80,
+                line_height - 6
+            )
+
+            if selected_index == white_ply:
+                pygame.draw.rect(self.window, (60, 60, 90), white_rect, border_radius=4)
+
+            surf = font.render(white_text, True, (230, 230, 230))
+            self.window.blit(surf, (white_x, row_y))
+            self.move_move_rects.append((white_rect, white_ply))
+
+            # --- BLACK MOVE ---
+            if black_ply:
+                black_rect = pygame.Rect(
+                    black_x - 4,
+                    row_y,
+                    80,
+                    line_height - 6
+                )
+
+                if selected_index == black_ply:
+                    pygame.draw.rect(self.window, (60, 60, 90), black_rect, border_radius=4)
+
+                surf = font.render(black_text, True, (230, 230, 230))
+                self.window.blit(surf, (black_x, row_y))
+                self.move_move_rects.append((black_rect, black_ply))
 
     def get_clicked_move_index(self, pos):
-        if not hasattr(self, "move_row_rects"):
+        if not hasattr(self, "move_move_rects"):
             return None
 
-        for rect, white_ply, black_ply in self.move_row_rects:
+        for rect, ply in self.move_move_rects:
             if rect.collidepoint(pos):
-                return white_ply, black_ply
+                return ply
         return None
 
     def draw_undo_redo_buttons(self, x, y, can_undo, can_redo):
