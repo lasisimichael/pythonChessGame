@@ -245,7 +245,7 @@ class Renderer:
             black_ply = white_ply + 1 if white_ply < len(san_history) else None
 
             white_text = san_history[white_ply - 1] if white_ply - 1 < len(san_history) else ""
-            black_text = san_history[black_ply - 1] if black_ply - 1 < len(san_history) else ""
+            black_text = san_history[black_ply - 1] if black_ply else ""
 
             col_gap = 10
             white_x = start_x + 28
