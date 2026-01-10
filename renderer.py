@@ -84,7 +84,7 @@ class Renderer:
                         (self.board_x + col * self.square_size, self.board_y + row * self.square_size)
                     )
 
-    def draw_status_bar(self, status_text, can_undo=False):
+    def draw_status_bar(self, status_text):
         bar_height = 64
         y = self.status_y
 
@@ -207,7 +207,8 @@ class Renderer:
                 return piece
         return None
 
-    def draw_move_list(self, san_history, start_x, start_y, height):
+    def draw_move_list(self, san_history, start_x, start_y, height, selected_index=None):
+        self.move_row_rects = []
         panel_width = self.window.get_width() - start_x - 10
 
         pygame.draw.rect(
@@ -236,8 +237,32 @@ class Renderer:
         moves = moves[start:end]
 
         for i, text in enumerate(moves):
+            row_y = start_y + i * line_height
+            rect = pygame.Rect(start_x - 4, row_y, panel_width - 8, line_height - 6)
+
+            absolute_row_index = start + i  # move-number index (not ply)
+
+            # Each row corresponds to two plies
+            white_ply = absolute_row_index * 2 + 1
+            black_ply = white_ply + 1 if white_ply < len(san_history) else None
+
+            if selected_index is not None:
+                if selected_index in (white_ply, black_ply):
+                    pygame.draw.rect(self.window, (60, 60, 90), rect, border_radius=4)
+
+            self.move_row_rects.append((rect, white_ply, black_ply))
+
             surf = font.render(text, True, (230, 230, 230))
-            self.window.blit(surf, (start_x, start_y + i * line_height))
+            self.window.blit(surf, (start_x, row_y))
+
+    def get_clicked_move_index(self, pos):
+        if not hasattr(self, "move_row_rects"):
+            return None
+
+        for rect, white_ply, black_ply in self.move_row_rects:
+            if rect.collidepoint(pos):
+                return white_ply, black_ply
+        return None
 
     def draw_undo_redo_buttons(self, x, y, can_undo, can_redo):
         font = pygame.font.SysFont(None, 22)

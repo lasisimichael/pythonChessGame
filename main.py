@@ -12,25 +12,29 @@ def mouse_to_square(pos, renderer):
     return None
 
 def handle_undo(game):
-    # If promotion UI is open, cancel it instead
-    if game.promotion_pending:
-        pawn, r, c = game.promotion_pending
-        game.promotion_pending = None
-        game.undo_move()
-        return
-
-    if not game.move_history:
+    # If promotion UI is open, cancel it instead of undoing
+    if not game.move_history or game.promotion_pending:
         return
 
     game.undo_move()
 
 def handle_redo(game):
-    if not game.redo_stack:
+    if not game.redo_stack or game.promotion_pending:
         return
 
     game.redo_move()
 
+def sync_last_move(game):
+    if game.move_history:
+        last = game.move_history[-1]
+        return (
+            (last.from_row, last.from_col),
+            (last.to_row, last.to_col),
+        )
+    return None, None
+
 def main():
+    selected_move_index = 0
     game_over = False
     selected_piece = None
     legal_targets = []
@@ -43,6 +47,7 @@ def main():
     game = GameState()
 
     renderer = Renderer(window, game.board)
+    renderer.move_scroll_offset = 0
     
     running = True
     while running:
@@ -56,6 +61,8 @@ def main():
                     handle_redo(game)
                     selected_piece = None
                     legal_targets = []
+                    selected_move_index = len(game.move_history)
+                    last_move_square, last_move_square_prev_square = sync_last_move(game)
 
                 # Save PGN file
                 if event.key == pygame.K_s:
@@ -66,34 +73,13 @@ def main():
                     handle_undo(game)
                     selected_piece = None
                     legal_targets = []
-                    last_move_square = None
-                    last_move_square_prev_square = None
+                    selected_move_index = len(game.move_history)
+                    last_move_square, last_move_square_prev_square = sync_last_move(game)
 
             if event.type == pygame.MOUSEWHEEL:
-                renderer.move_scroll_offset -= event.y * 1
+                renderer.move_scroll_offset -= event.y * 2
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if hasattr(renderer, "undo_rect"):
-                    if renderer.undo_rect.collidepoint(event.pos) and game.move_history:
-                        handle_undo(game)
-                        selected_piece = None
-                        legal_targets = []
-                        last_move_square = None
-                        continue
-                if hasattr(renderer, "redo_rect"):
-                    if renderer.redo_rect.collidepoint(event.pos) and game.redo_stack:
-                        handle_redo(game)
-                        selected_piece = None
-                        legal_targets = []
-                        continue
-
-                if game.promotion_pending:
-                    choice = renderer.handle_promotion_click(event.pos)
-                    if choice:
-                        pawn, _, _ = game.promotion_pending
-                        game.promote_pawn(pawn, choice)
-                    continue
-
                 if game_over:
                     game = GameState()
                     renderer = Renderer(window, game.board)
@@ -101,8 +87,62 @@ def main():
                     selected_piece = None
                     legal_targets = []
                     last_move_square = None
+                    last_move_square_prev_square = None
                     game_over = False
                     continue
+
+                if game.promotion_pending:
+                    choice = renderer.handle_promotion_click(event.pos)
+                    if choice:
+                        pawn, _, _ = game.promotion_pending
+                        game.promote_pawn(pawn, choice)
+                        selected_move_index = len(game.move_history)
+                        last_move_square, last_move_square_prev_square = sync_last_move(game)
+
+                    continue
+
+                clicked_index = renderer.get_clicked_move_index(event.pos)
+                if clicked_index is not None:
+                    white_ply, black_ply = clicked_index
+                    selected_piece = None
+                    legal_targets = []
+
+                    target_ply = (
+                            black_ply
+                            if black_ply is not None and len(game.move_history) >= black_ply
+                            else white_ply
+                        )
+                    
+                    current_index = len(game.move_history)
+
+                    while current_index > target_ply:
+                        game.undo_move()
+                        current_index -= 1
+
+                    while current_index < target_ply and game.redo_stack:
+                        game.redo_move()
+                        current_index += 1
+
+                    last_move_square, last_move_square_prev_square = sync_last_move(game)
+                    selected_move_index = target_ply
+                    continue
+
+                if hasattr(renderer, "undo_rect"):
+                    if renderer.undo_rect.collidepoint(event.pos) and game.move_history:
+                        handle_undo(game)
+                        selected_piece = None
+                        legal_targets = []
+                        selected_move_index = len(game.move_history)
+                        last_move_square, last_move_square_prev_square = sync_last_move(game)
+                        continue
+                if hasattr(renderer, "redo_rect"):
+                    if renderer.redo_rect.collidepoint(event.pos) and game.redo_stack:
+                        handle_redo(game)
+                        selected_piece = None
+                        legal_targets = []
+                        selected_move_index = len(game.move_history)
+                        last_move_square, last_move_square_prev_square = sync_last_move(game)
+                        continue
 
                 square = mouse_to_square(event.pos, renderer)
 
@@ -112,12 +152,6 @@ def main():
                     continue
 
                 row, col = square
-
-                # Ignore clicks outside board
-                if not (0 <= row < 8 and 0 <= col < 8):
-                    selected_piece = None
-                    legal_targets = []
-                    continue
 
                 clicked_piece = game.board.grid[row][col]
 
@@ -132,12 +166,12 @@ def main():
                 else:
                     if (row, col) in legal_targets:
                         game.make_move(selected_piece, row, col)
+                        selected_move_index = len(game.move_history)
                         renderer.move_scroll_offset = 10**9  # Scroll to bottom
 
                         last_move = game.move_history[-1] if game.move_history else None
                         if last_move:
-                            last_move_square = (last_move.to_row, last_move.to_col)
-                            last_move_square_prev_square = (last_move.from_row, last_move.from_col)
+                            last_move_square, last_move_square_prev_square = sync_last_move(game)
                         else:
                             last_move_square = None
                             last_move_square_prev_square = None
@@ -188,7 +222,8 @@ def main():
             game.san_history,
             start_x=renderer.board_x + 8 * renderer.square_size + 42 ,
             start_y=20,
-            height=move_list_height
+            height=move_list_height,
+            selected_index=selected_move_index
         )
 
         buttons_y = 20 + move_list_height + 12
@@ -217,10 +252,7 @@ def main():
                 renderer.highlight_square(king_pos[0], king_pos[1], color=(255, 0, 0))
 
         renderer.draw_pieces()
-        if len(game.move_history) < 1 or game_over:
-            renderer.draw_status_bar(status_text)
-        else:
-            renderer.draw_status_bar(status_text, can_undo=True)
+        renderer.draw_status_bar(status_text)
 
         if game_over:
             game.export_pgn()
